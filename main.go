@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -14,7 +15,7 @@ type PageStatus struct {
 	Duration int64
 }
 
-func check(links []string) {
+func check(links []string, timeout int, verbose bool) []PageStatus {
 	var wg sync.WaitGroup
 	c := make(chan PageStatus)
 	wg.Add(len(links))
@@ -25,19 +26,30 @@ func check(links []string) {
 	}()
 
 	for _, link := range links {
-		go checkLink(link, c, &wg)
+		go checkLink(link, timeout, c, &wg)
 	}
 
+	var ret []PageStatus
 	for ps := range c {
-		fmt.Printf("%+v\n", ps)
+		if verbose {
+			fmt.Printf("%+v\n", ps)
+		}
+		ret = append(ret, ps)
 	}
+
+	return ret
 }
 
-func checkLink(link string, c chan PageStatus, wg *sync.WaitGroup) {
+func checkLink(link string, timeout int, c chan PageStatus, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	// setup http client with timeout
+	client := http.Client{
+		Timeout: time.Duration(time.Duration(timeout) * time.Second),
+	}
+
 	start := time.Now()
-	_, err := http.Get(link)
+	_, err := client.Get(link)
 	end := time.Now()
 	elapsed := end.Sub(start)
 
@@ -48,6 +60,11 @@ func checkLink(link string, c chan PageStatus, wg *sync.WaitGroup) {
 	}
 	if err != nil {
 		ps.Status = "down"
+		if uerr, ok := err.(*url.Error); ok {
+			if uerr.Timeout() {
+				ps.Status = "timeout"
+			}
+		}
 	}
 	c <- ps
 }
@@ -60,5 +77,8 @@ func main() {
 		"https://golang.com",
 		"https://amazon.com",
 	}
-	check(links)
+	timeout := 30 // in seconds
+
+	results := check(links, timeout, true)
+	fmt.Printf("%+v\n", results)
 }
