@@ -1,18 +1,57 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
 // PageStatus stores the results of checking.
 type PageStatus struct {
-	Link     string
-	Status   string
-	Duration int64
+	Link     string `json:"link"`
+	Status   string `json:"status"`
+	Duration int64  `json:"duration"`
+}
+
+func gatewayHandler(events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	ps, err := lambdaHandler()
+	if err != nil {
+		return serverError(err)
+	}
+	js, err := json.Marshal(ps)
+	if err != nil {
+		return serverError(err)
+	}
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Body:       string(js),
+	}, nil
+}
+
+func serverError(err error) (events.APIGatewayProxyResponse, error) {
+	fmt.Println(err)
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusInternalServerError,
+		Body:       http.StatusText(http.StatusInternalServerError),
+	}, nil
+}
+
+func lambdaHandler() ([]PageStatus, error) {
+	links := []string{
+		"https://google.com",
+		"https://facebook.com",
+		"https://stackoverflow.com",
+		"https://golang.com",
+		"https://amazon.com",
+	}
+	timeout := 30 // in seconds
+	return check(links, timeout, true), nil
 }
 
 func check(links []string, timeout int, verbose bool) []PageStatus {
@@ -70,15 +109,5 @@ func checkLink(link string, timeout int, c chan PageStatus, wg *sync.WaitGroup) 
 }
 
 func main() {
-	links := []string{
-		"https://google.com",
-		"https://facebook.com",
-		"https://stackoverflow.com",
-		"https://golang.com",
-		"https://amazon.com",
-	}
-	timeout := 30 // in seconds
-
-	results := check(links, timeout, true)
-	fmt.Printf("%+v\n", results)
+	lambda.Start(gatewayHandler)
 }
